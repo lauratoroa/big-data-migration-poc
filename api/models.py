@@ -4,11 +4,11 @@ from datetime import datetime
 
 class Department(BaseModel):
     id: int
-    name: str
+    department: str
 
 class Job(BaseModel):
     id: int
-    name: str
+    job: str
 
 class HiredEmployee(BaseModel):
     id: int
