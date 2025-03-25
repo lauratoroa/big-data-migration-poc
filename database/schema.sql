@@ -13,10 +13,10 @@ CREATE TABLE jobs (
 -- Create the hired_employees table
 CREATE TABLE hired_employees (
     id INTEGER PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    datetime TIMESTAMP NOT NULL,
-    department_id INTEGER NOT NULL,
-    job_id INTEGER NOT NULL
+    name VARCHAR(100) NULL,
+    datetime TIMESTAMP NULL,
+    department_id INTEGER NULL,
+    job_id INTEGER NULL
 );
 
 
