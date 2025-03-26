@@ -4,7 +4,7 @@ import pandas as pd
 import fastavro
 import os
 import io
-from backups.bk_db import SessionLocal, upload_to_s3
+from backups.bk_db import SessionLocal, upload_to_s3, download_from_s3, engine
 
 router = APIRouter()
 
@@ -85,3 +85,34 @@ def backup_table(table_name: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Failed to upload backup to S3: {str(e)}")
 
     return {"message": f"Backup of {table_name} saved to S3 successfully!", "s3_path": s3_key}
+
+@router.get("/restore/{table_name}")
+def restore_table(table_name: str, db: Session = Depends(get_db)):
+    """Restore a table from AVRO stored in S3"""
+    try:
+        # S3 path
+        s3_key = f"backups/{table_name}.avro"
+        
+        # Download file
+        avro_buffer = io.BytesIO()
+        download_from_s3(s3_key, avro_buffer)
+        avro_buffer.seek(0)
+
+        # Read AVRO
+        reader = fastavro.reader(avro_buffer)
+        records = [record for record in reader]
+        
+        if not records:
+            raise HTTPException(status_code=400, detail=f"No data found in backup for {table_name}.")
+
+        # Convert to DataFrame
+        df = pd.DataFrame(records)
+
+        # Inserting in the database
+        with db.begin():
+            df.to_sql(table_name, con=engine, if_exists="append", index=False)
+
+        return {"message": f"Successfully restored {len(df)} records into {table_name}!"}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to restore {table_name}: {str(e)}")
