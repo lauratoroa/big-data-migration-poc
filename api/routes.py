@@ -1,13 +1,9 @@
-import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from api.db import SessionLocal
-from api.models import BatchInsertDepartments, BatchInsertJobs, BatchInsertHiredEmployees
+from api.db import SessionLocal, validate_dataframe
 import pandas as pd
 
 router = APIRouter()
-
-logging.basicConfig(filename="invalid_records.log", level=logging.WARNING, format="%(asctime)s - %(message)s")
 
 # Dependency to get the database session
 def get_db():
@@ -17,55 +13,68 @@ def get_db():
     finally:
         db.close()
 
-def validate_dataframe(df, table_name):
-    """
-    Validates that all required fields are present
-    Logs invalid rows and removes them from the dataframe
-    """
-    required_columns = {
-        "departments": ["id", "department"],
-        "jobs": ["id", "job"],
-        "hired_employees": ["id", "name", "datetime", "department_id", "job_id"]
+# Setting the columns and types
+TABLE_VALIDATION_RULES = {
+    "departments": {
+        "required_columns": ["id", "department"],
+        "expected_types": {"id": int, "department": str}
+    },
+    "jobs": {
+        "required_columns": ["id", "job"],
+        "expected_types": {"id": int, "job": str}
+    },
+    "hired_employees": {
+        "required_columns": ["id", "name", "datetime", "department_id", "job_id"],
+        "expected_types": {"id": int, "name": str, "datetime": str, "department_id": int, "job_id": int}
     }
+}
 
-    if table_name not in required_columns:
-        raise ValueError(f"Unknown table: {table_name}")
+@router.post("/insert/{table_name}")
+def insert_data(table_name: str, payload: dict, db: Session = Depends(get_db)):
+    """
+    Inserts data into the table, ensuring it follows data rules
+    """
 
-    missing_columns = [col for col in required_columns[table_name] if col not in df.columns]
-    if missing_columns:
-        raise HTTPException(status_code=400, detail=f"Missing columns: {missing_columns}")
+    # Check that data exists in request
+    if "data" not in payload or not isinstance(payload["data"], list):
+        raise HTTPException(status_code=400, detail="Invalid JSON format. Must contain a 'data' list.")
 
-    invalid_rows = df[df.isnull().any(axis=1)]
-    if not invalid_rows.empty:
-        logging.warning(f"Invalid records found in {table_name}:\n{invalid_rows}")
-        # Removes nulls
-        df = df.dropna()  
+    data = payload["data"]
 
-    return df
+    # Batch size limit (1-1000 rows)
+    if not (1 <= len(data) <= 1000):
+        raise HTTPException(status_code=400, detail="Batch size must be between 1 and 1000 rows.")
 
+    # Convert data to DataFrame
+    df = pd.DataFrame(data)
+
+    # Validation rules
+    validation_rules = TABLE_VALIDATION_RULES.get(table_name)
+    if not validation_rules:
+        raise HTTPException(status_code=400, detail=f"No validation rules found for table: {table_name}")
+
+    # Validate data before inserting
+    df_valid = validate_dataframe(df, db, table_name, f"/insert/{table_name}")
+
+    if df_valid.empty:
+        raise HTTPException(status_code=400, detail=f"All records failed validation. Check error_logs for details")
+
+    # Insert only valid data
+    try:
+        df_valid.to_sql(table_name, con=db.bind, if_exists="append", index=False)
+        return {"message": f"{len(df_valid)} records inserted successfully into {table_name}!"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database insertion failed: {str(e)}")
+
+# Endpoints
 @router.post("/insert/departments")
-def insert_departments(payload: BatchInsertDepartments, db: Session = Depends(get_db)):
-    df = pd.DataFrame([d.dict() for d in payload.data])
-    df = validate_dataframe(df, "departments")
-    if df.empty:
-        return {"message": "No valid records to insert"}
-    df.to_sql("departments", con=db.bind, if_exists="append", index=False)
-    return {"message": "Departments inserted successfully!"}
+def insert_departments(payload: dict, db: Session = Depends(get_db)):
+    return insert_data(payload, "departments", db)
 
 @router.post("/insert/jobs")
-def insert_jobs(payload: BatchInsertJobs, db: Session = Depends(get_db)):
-    df = pd.DataFrame([d.dict() for d in payload.data])
-    df = validate_dataframe(df, "jobs")
-    if df.empty:
-        return {"message": "No valid records to insert"}
-    df.to_sql("jobs", con=db.bind, if_exists="append", index=False)
-    return {"message": "Jobs inserted successfully!"}
+def insert_jobs(payload: dict, db: Session = Depends(get_db)):
+    return insert_data(payload, "jobs", db)
 
 @router.post("/insert/hired_employees")
-def insert_hired_employees(payload: BatchInsertHiredEmployees, db: Session = Depends(get_db)):
-    df = pd.DataFrame([e.dict() for e in payload.data])
-    df = validate_dataframe(df, "hired_employees")
-    if df.empty:
-        return {"message": "No valid records to insert"}
-    df.to_sql("hired_employees", con=db.bind, if_exists="append", index=False)
-    return {"message": "Hired Employees inserted successfully!"}
+def insert_hired_employees(payload: dict, db: Session = Depends(get_db)):
+    return insert_data(payload, "hired_employees", db)
