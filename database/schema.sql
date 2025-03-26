@@ -19,6 +19,14 @@ CREATE TABLE hired_employees (
     job_id INTEGER NULL
 );
 
+-- Create the logs table
+CREATE TABLE error_logs (
+    id SERIAL PRIMARY KEY,
+    timestamp TIMESTAMP DEFAULT NOW(),
+    endpoint VARCHAR(255),
+    error_message TEXT
+);
+
 
 
 
