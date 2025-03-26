@@ -3,6 +3,8 @@ import json
 import pandas as pd
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
+from fastapi import HTTPException
+
 
 def get_secret():
     """Retrieve database credentials from AWS Secrets Manager"""
@@ -31,8 +33,16 @@ s3_client = boto3.client("s3")
 
 def upload_to_s3(file_buffer, s3_key: str):
     """Upload a file to an S3 bucket from memory"""
-    s3_client.upload_fileobj(file_buffer, S3_BUCKET_NAME, s3_folder + s3_key)
+    try:
+        s3_client.upload_fileobj(file_buffer, S3_BUCKET_NAME, s3_folder + s3_key)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to upload backup to S3: {str(e)}")
+
 
 def download_from_s3(s3_key: str, file_path: str):
     """Download a file from S3 to a local path"""
-    s3_client.download_file(S3_BUCKET_NAME, s3_folder + s3_key, file_path)
+    try:
+        s3_client.download_fileobj(S3_BUCKET_NAME, s3_folder + s3_key, file_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to download backup from S3: {str(e)}")
+
